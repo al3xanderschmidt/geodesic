@@ -24,6 +24,7 @@ RUN apk update \
           mkdir -p /etc/bash_completion.d/ /etc/profile.d/ \
     && mkdir -p /conf \
     && touch /conf/.gitconfig \
+    && git config --global advice.detachedHead false
 
 RUN echo "net.ipv6.conf.all.disable_ipv6=0" > /etc/sysctl.d/00-ipv6.conf
 
@@ -32,51 +33,35 @@ RUN echo 'set noswapfile' >> /etc/vim/vimrc
 
 WORKDIR /tmp
 
+# 
+# Install the simple cloudposse package manager
 #
-# Install aws-vault to easily assume roles (not related to HashiCorp Vault)
+ARG PACKAGES_VERSION=0.1.1
+ENV PACKAGES_VERSION ${PACKAGES_VERSION}
+RUN git clone --depth=1 -b ${PACKAGES_VERSION} https://github.com/cloudposse/packages.git /packages && rm -rf /packages/.git
+
 #
-ENV AWS_VAULT_VERSION 4.2.0
+# Install packges using the package manager
+#
+ARG PACKAGES="aws-vault chamber fetch helm helmfile github-commenter gomplate kops kubectl terraform sops"
+ENV PACKAGES ${PACKAGES}
+RUN make -C /packages/install ${PACKAGES}
+
+#
+# Configure aws-vault to easily assume roles (not related to HashiCorp Vault)
+#
 ENV AWS_VAULT_BACKEND file
 ENV AWS_VAULT_ASSUME_ROLE_TTL=1h
 #ENV AWS_VAULT_FILE_PASSPHRASE=
-RUN curl --fail -sSL -o /usr/local/bin/aws-vault https://github.com/99designs/aws-vault/releases/download/v${AWS_VAULT_VERSION}/aws-vault-linux-amd64 \
-    && chmod +x /usr/local/bin/aws-vault
 
 #
-# Install github-commenter
-#
-ENV GITHUB_COMMENTER_VERSION 0.1.0
-RUN curl --fail -sSL -o /usr/local/bin/github-commenter https://github.com/cloudposse/github-commenter/releases/download/${GITHUB_COMMENTER_VERSION}/github-commenter_linux_amd64 \
-    && chmod +x /usr/local/bin/github-commenter
-
-#
-# Install gomplate
-#
-ENV GOMPLATE_VERSION 2.4.0
-RUN curl --fail -sSL -o /usr/local/bin/gomplate https://github.com/hairyhenderson/gomplate/releases/download/v${GOMPLATE_VERSION}/gomplate_linux-amd64-slim \
-    && chmod +x /usr/local/bin/gomplate
-
-#
-# Install Terraform
-#
-ENV TERRAFORM_VERSION 0.11.5
-RUN curl --fail -sSL -O https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/terraform_${TERRAFORM_VERSION}_linux_amd64.zip \
-    && unzip terraform_${TERRAFORM_VERSION}_linux_amd64.zip \
-    && rm terraform_${TERRAFORM_VERSION}_linux_amd64.zip \
-    && mv terraform /usr/local/bin
-
-#
-# Install kubectl
+# Configure kubectl
 #
 ENV KUBECONFIG=${SECRETS_PATH}/kubernetes/kubeconfig
-ENV KUBERNETES_VERSION 1.8.7
-RUN curl --fail -sSL -O https://storage.googleapis.com/kubernetes-release/release/v${KUBERNETES_VERSION}/bin/linux/amd64/kubectl \
-    && mv kubectl /usr/local/bin/kubectl \
-    && chmod +x /usr/local/bin/kubectl \
-    && kubectl completion bash > /etc/bash_completion.d/kubectl.sh
+RUN [ -z "`which kubectl`" ] || (kubectl completion bash > /etc/bash_completion.d/kubectl.sh)
 
 #
-# Install kops
+# Configure kops
 #
 ENV KOPS_VERSION 1.8.0
 ENV KOPS_STATE_STORE s3://undefined
@@ -94,10 +79,7 @@ ENV KOPS_PRIVATE_SUBNETS="172.20.32.0/19,172.20.64.0/19,172.20.96.0/19,172.20.12
 ENV KOPS_UTILITY_SUBNETS="172.20.0.0/22,172.20.4.0/22,172.20.8.0/22,172.20.12.0/22"
 ENV KOPS_AVAILABILITY_ZONES="us-west-2a,us-west-2b,us-west-2c"
 ENV KUBECONFIG=/dev/shm/kubecfg
-RUN curl --fail -sSL -O https://github.com/kubernetes/kops/releases/download/${KOPS_VERSION}/kops-linux-amd64 \
-    && mv kops-linux-amd64 /usr/local/bin/kops \
-    && chmod +x /usr/local/bin/kops \
-    && /usr/local/bin/kops completion bash > /etc/bash_completion.d/kops.sh
+RUN [ -z "`which kops`" ] || /usr/local/bin/kops completion bash > /etc/bash_completion.d/kops.sh
 
 # Instance sizes
 ENV BASTION_MACHINE_TYPE "t2.medium"
@@ -109,35 +91,25 @@ ENV NODE_MAX_SIZE 2
 ENV NODE_MIN_SIZE 2
 
 #
-# Install sops (required by `helm-secrets`)
-# 
-ENV SOPS_VERSION 3.0.2
-RUN curl --fail -sSL -o /usr/local/bin/sops https://github.com/mozilla/sops/releases/download/${SOPS_VERSION}/sops-${SOPS_VERSION}.linux \
-    && chmod +x /usr/local/bin/sops
-
-#
 # Install helm
 #
 ENV HELM_VERSION 2.8.2
 ENV HELM_HOME /var/lib/helm
 ENV HELM_VALUES_PATH=${SECRETS_PATH}/helm/values
-RUN curl --fail -sSL -O http://storage.googleapis.com/kubernetes-helm/helm-v${HELM_VERSION}-linux-amd64.tar.gz \
-    && tar -zxf helm-v${HELM_VERSION}-linux-amd64.tar.gz \
-    && mv linux-amd64/helm /usr/local/bin/helm \
-    && rm -rf linux-amd64 \
-    && chmod +x /usr/local/bin/helm \
-    && helm completion bash > /etc/bash_completion.d/helm.sh \
-    && mkdir -p ${HELM_HOME} \
-    && helm init --client-only \
-    && mkdir -p ${HELM_HOME}/plugins \
+RUN [ -z "`which helm`" ] || \
+    (helm completion bash > /etc/bash_completion.d/helm.sh \
+      && mkdir -p ${HELM_HOME} \
+      && helm init --client-only \
+      && mkdir -p ${HELM_HOME}/plugins)
 
 #
 # Install helm repos
 #
-RUN helm repo add cloudposse-incubator https://charts.cloudposse.com/incubator/ \
-    && helm repo add incubator  https://kubernetes-charts-incubator.storage.googleapis.com/ \
-    && helm repo add coreos-stable https://s3-eu-west-1.amazonaws.com/coreos-charts/stable/ \
-    && helm repo update
+RUN [ -z "`which helm`" ] || \
+    (helm repo add cloudposse-incubator https://charts.cloudposse.com/incubator/ \
+      && helm repo add incubator  https://kubernetes-charts-incubator.storage.googleapis.com/ \
+      && helm repo add coreos-stable https://s3-eu-west-1.amazonaws.com/coreos-charts/stable/ \
+      && helm repo update)
 
 # 
 # Install helm plugins
@@ -148,19 +120,12 @@ ENV HELM_EDIT_VERSION 0.2.0
 ENV HELM_GITHUB_VERSION 0.2.0
 ENV HELM_SECRETS_VERSION 1.2.9
 
-RUN helm plugin install https://github.com/app-registry/appr-helm-plugin --version v${HELM_APPR_VERSION} \
-    && helm plugin install https://github.com/mstrzele/helm-edit --version v${HELM_EDIT_VERSION} \
-    && helm plugin install https://github.com/databus23/helm-diff --version v${HELM_DIFF_VERSION} \
-    && helm plugin install https://github.com/futuresimple/helm-secrets --version ${HELM_SECRETS_VERSION} \
-    && helm plugin install https://github.com/sagansystems/helm-github --version ${HELM_GITHUB_VERSION}
-
-#
-# Install helmfile
-#
-ENV HELMFILE_VERSION 0.11
-RUN curl --fail -sSL -o /usr/local/bin/helmfile https://github.com/roboll/helmfile/releases/download/v${HELMFILE_VERSION}/helmfile_linux_amd64 \
-    && chmod +x /usr/local/bin/helmfile
-
+RUN [ -z "`which helm`" ] || \
+    (helm plugin install https://github.com/app-registry/appr-helm-plugin --version v${HELM_APPR_VERSION} \
+      && helm plugin install https://github.com/mstrzele/helm-edit --version v${HELM_EDIT_VERSION} \
+      && helm plugin install https://github.com/databus23/helm-diff --version v${HELM_DIFF_VERSION} \
+      && helm plugin install https://github.com/futuresimple/helm-secrets --version ${HELM_SECRETS_VERSION} \
+      && helm plugin install https://github.com/sagansystems/helm-github --version ${HELM_GITHUB_VERSION})
 
 #
 # Install packer
@@ -179,19 +144,6 @@ ENV JINJA2_VERSION 2.10
 RUN pip install ansible==${ANSIBLE_VERSION} boto Jinja2==${JINJA2_VERSION} && \
     rm -rf /root/.cache && \
     find / -type f -regex '.*\.py[co]' -delete
-
-# Install Chamber to manage secrets with SSM+KMS
-#
-ENV CHAMBER_VERSION 2.0.0
-RUN curl --fail -sSL -o /usr/local/bin/chamber https://github.com/segmentio/chamber/releases/download/v${CHAMBER_VERSION}/chamber-v${CHAMBER_VERSION}-linux-amd64 \
-    && chmod +x /usr/local/bin/chamber
-
-#
-# Install goofys
-#
-ENV GOOFYS_VERSION 0.19.0
-RUN curl --fail -sSL -o /usr/local/bin/goofys https://github.com/kahing/goofys/releases/download/v${GOOFYS_VERSION}/goofys \
-    && chmod +x /usr/local/bin/goofys
 
 #
 # Install Google Cloud SDK
