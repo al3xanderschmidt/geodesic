@@ -1,5 +1,7 @@
 # Essential alpine packages
+atlantis@cloudposse==0.4.10-r0
 aws-iam-authenticator@cloudposse
+aws-vault@cloudposse
 bash
 bash-completion
 coreutils
@@ -7,11 +9,13 @@ chamber@cloudposse
 curl
 drill
 dumb-init
+fargate@cloudposse
 figlet
 fuse
 gettext
 git
 gomplate@cloudposse
+gosu@cloudposse
 groff
 iputils
 jq
